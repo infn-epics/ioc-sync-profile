@@ -6,17 +6,25 @@ import threading
 import numpy as np
 from softioc import softioc, builder
 import epics
+import yaml
 
 def main():
     parser = argparse.ArgumentParser(description='EPICS Soft IOC for synchronization profile')
-    parser.add_argument('pv_names', nargs='+', help='List of PV names to monitor')
+    parser.add_argument('--config', required=True, help='YAML config file with devices to monitor')
     parser.add_argument("-p", "--pvout", required=False, default="pvlist.txt", help="Output PV list file")
     parser.add_argument("--prefix", default="SYNC", help="IOC prefix for PV names")
     args = parser.parse_args()
 
-    pv_names = args.pv_names
-    num_pvs = len(pv_names)
-    data = {name: {'times': [], 'freqs': []} for name in pv_names}
+    with open(args.config) as f:
+        config = yaml.safe_load(f)
+    devices = config['devices']
+    names = [d['name'] for d in devices]
+    pvs = [d['pv'] for d in devices]
+    name_to_pv = {d['name']: d['pv'] for d in devices}
+    pv_to_name = {d['pv']: d['name'] for d in devices}
+
+    num_pvs = len(pvs)
+    data = {pv: {'times': [], 'freqs': []} for pv in pvs}
     window_size = 100  # Number of samples for stats
 
     # Set device name
@@ -24,7 +32,7 @@ def main():
 
     # Create PVs for each input PV stats
     freq_pvs = {}
-    for i, name in enumerate(pv_names):
+    for name in names:
         freq_pvs[name] = {
             'instant': builder.aIn(f'{name}:InstantFreq', initial_value=0.0),
             'avg': builder.aIn(f'{name}:AvgFreq', initial_value=0.0),
@@ -37,7 +45,9 @@ def main():
     diff_pvs = {}
     for i in range(num_pvs):
         for j in range(i+1, num_pvs):
-            pair_name = f'{pv_names[i]}_vs_{pv_names[j]}'
+            name1 = names[i]
+            name2 = names[j]
+            pair_name = f'{name1}_vs_{name2}'
             diff_pvs[(i, j)] = {
                 'current': builder.aIn(f'{pair_name}:CurrentDiff', initial_value=0.0),
                 'avg': builder.aIn(f'{pair_name}:AvgDiff', initial_value=0.0),
@@ -63,8 +73,8 @@ def main():
                 update_calculations()
 
         # Connect to PVs
-        for name in pv_names:
-            epics.camonitor(name, callback=callback)
+        for pv in pvs:
+            epics.camonitor(pv, callback=callback)
 
         # Keep running
         while True:
@@ -72,8 +82,9 @@ def main():
 
     def update_calculations():
         # Update frequency stats for each PV
-        for i, name in enumerate(pv_names):
-            freqs = data[name]['freqs']
+        for name in names:
+            pv = name_to_pv[name]
+            freqs = data[pv]['freqs']
             if freqs:
                 instant_freq = freqs[-1]
                 avg_freq = np.mean(freqs)
@@ -90,10 +101,12 @@ def main():
         # Update diff stats for each pair
         for i in range(num_pvs):
             for j in range(i+1, num_pvs):
-                name1 = pv_names[i]
-                name2 = pv_names[j]
-                times1 = data[name1]['times']
-                times2 = data[name2]['times']
+                name1 = names[i]
+                name2 = names[j]
+                pv1 = name_to_pv[name1]
+                pv2 = name_to_pv[name2]
+                times1 = data[pv1]['times']
+                times2 = data[pv2]['times']
                 if times1 and times2:
                     # Current diff based on latest update times
                     current_diff = times1[-1] - times2[-1]

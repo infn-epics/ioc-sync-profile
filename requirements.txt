@@ -1,0 +1,4 @@
+numpy
+softioc
+pyepics
+PyYAML
