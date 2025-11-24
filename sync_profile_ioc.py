@@ -4,90 +4,96 @@ import argparse
 import time
 import threading
 import numpy as np
-from caproto.server import pvproperty, PVGroup, ioc_arg_parser, run
-from caproto import ChannelType
+from softioc import softioc, builder
 import epics
 
-class SyncProfileIOC(PVGroup):
-    def __init__(self, pv_names, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.pv_names = pv_names
-        self.num_pvs = len(pv_names)
-        self.data = {name: {'times': [], 'freqs': []} for name in pv_names}
-        self.last_update = {name: time.time() for name in pv_names}
-        self.window_size = 100  # Number of samples for stats
+def main():
+    parser = argparse.ArgumentParser(description='EPICS Soft IOC for synchronization profile')
+    parser.add_argument('pv_names', nargs='+', help='List of PV names to monitor')
+    parser.add_argument("-p", "--pvout", required=False, default="pvlist.txt", help="Output PV list file")
+    parser.add_argument("--prefix", default="SYNC", help="IOC prefix for PV names")
+    args = parser.parse_args()
 
-        # Create PVs for each input PV stats
-        for i, name in enumerate(pv_names):
-            setattr(self, f'instant_freq_{i}', pvproperty(value=0.0, dtype=ChannelType.DOUBLE, name=f'{name}:InstantFreq'))
-            setattr(self, f'avg_freq_{i}', pvproperty(value=0.0, dtype=ChannelType.DOUBLE, name=f'{name}:AvgFreq'))
-            setattr(self, f'min_freq_{i}', pvproperty(value=0.0, dtype=ChannelType.DOUBLE, name=f'{name}:MinFreq'))
-            setattr(self, f'max_freq_{i}', pvproperty(value=0.0, dtype=ChannelType.DOUBLE, name=f'{name}:MaxFreq'))
-            setattr(self, f'std_freq_{i}', pvproperty(value=0.0, dtype=ChannelType.DOUBLE, name=f'{name}:StdFreq'))
+    pv_names = args.pv_names
+    num_pvs = len(pv_names)
+    data = {name: {'times': [], 'freqs': []} for name in pv_names}
+    window_size = 100  # Number of samples for stats
 
-        # Create PVs for time diffs between PVs
-        for i in range(self.num_pvs):
-            for j in range(i+1, self.num_pvs):
-                pair_name = f'{pv_names[i]}_vs_{pv_names[j]}'
-                setattr(self, f'current_diff_{i}_{j}', pvproperty(value=0.0, dtype=ChannelType.DOUBLE, name=f'{pair_name}:CurrentDiff'))
-                setattr(self, f'avg_diff_{i}_{j}', pvproperty(value=0.0, dtype=ChannelType.DOUBLE, name=f'{pair_name}:AvgDiff'))
-                setattr(self, f'min_diff_{i}_{j}', pvproperty(value=0.0, dtype=ChannelType.DOUBLE, name=f'{pair_name}:MinDiff'))
-                setattr(self, f'max_diff_{i}_{j}', pvproperty(value=0.0, dtype=ChannelType.DOUBLE, name=f'{pair_name}:MaxDiff'))
-                setattr(self, f'std_diff_{i}_{j}', pvproperty(value=0.0, dtype=ChannelType.DOUBLE, name=f'{pair_name}:StdDiff'))
+    # Set device name
+    builder.SetDeviceName(args.prefix)
 
-        # Start monitoring thread
-        self.monitor_thread = threading.Thread(target=self.monitor_pvs)
-        self.monitor_thread.daemon = True
-        self.monitor_thread.start()
+    # Create PVs for each input PV stats
+    freq_pvs = {}
+    for i, name in enumerate(pv_names):
+        freq_pvs[name] = {
+            'instant': builder.aIn(f'{name}:InstantFreq', initial_value=0.0),
+            'avg': builder.aIn(f'{name}:AvgFreq', initial_value=0.0),
+            'min': builder.aIn(f'{name}:MinFreq', initial_value=0.0),
+            'max': builder.aIn(f'{name}:MaxFreq', initial_value=0.0),
+            'std': builder.aIn(f'{name}:StdFreq', initial_value=0.0),
+        }
 
-    def monitor_pvs(self):
+    # Create PVs for time diffs between PVs
+    diff_pvs = {}
+    for i in range(num_pvs):
+        for j in range(i+1, num_pvs):
+            pair_name = f'{pv_names[i]}_vs_{pv_names[j]}'
+            diff_pvs[(i, j)] = {
+                'current': builder.aIn(f'{pair_name}:CurrentDiff', initial_value=0.0),
+                'avg': builder.aIn(f'{pair_name}:AvgDiff', initial_value=0.0),
+                'min': builder.aIn(f'{pair_name}:MinDiff', initial_value=0.0),
+                'max': builder.aIn(f'{pair_name}:MaxDiff', initial_value=0.0),
+                'std': builder.aIn(f'{pair_name}:StdDiff', initial_value=0.0),
+            }
+
+    def monitor_pvs():
         def callback(pvname, value, **kwargs):
-            pv_timestamp = kwargs.get('timestamp', 0)
+            pv_timestamp = kwargs.get('timestamp', time.time())
             name = pvname
-            if name in self.data:
-                self.data[name]['times'].append(pv_timestamp)
-                if len(self.data[name]['times']) > 1:
-                    dt = pv_timestamp - self.data[name]['times'][-2]
+            if name in data:
+                data[name]['times'].append(pv_timestamp)
+                if len(data[name]['times']) > 1:
+                    dt = pv_timestamp - data[name]['times'][-2]
                     freq = 1.0 / dt if dt > 0 else 0.0
-                    self.data[name]['freqs'].append(freq)
+                    data[name]['freqs'].append(freq)
                     # Keep only recent samples
-                    if len(self.data[name]['freqs']) > self.window_size:
-                        self.data[name]['freqs'] = self.data[name]['freqs'][-self.window_size:]
-                        self.data[name]['times'] = self.data[name]['times'][-self.window_size:]
-                self.update_calculations()
+                    if len(data[name]['freqs']) > window_size:
+                        data[name]['freqs'] = data[name]['freqs'][-window_size:]
+                        data[name]['times'] = data[name]['times'][-window_size:]
+                update_calculations()
 
         # Connect to PVs
-        for name in self.pv_names:
+        for name in pv_names:
             epics.camonitor(name, callback=callback)
 
         # Keep running
         while True:
             time.sleep(1)
 
-    def update_calculations(self):
+    def update_calculations():
         # Update frequency stats for each PV
-        for i, name in enumerate(self.pv_names):
-            freqs = self.data[name]['freqs']
+        for i, name in enumerate(pv_names):
+            freqs = data[name]['freqs']
             if freqs:
-                instant_freq = freqs[-1] if freqs else 0.0
+                instant_freq = freqs[-1]
                 avg_freq = np.mean(freqs)
                 min_freq = np.min(freqs)
                 max_freq = np.max(freqs)
                 std_freq = np.std(freqs)
 
-                getattr(self, f'instant_freq_{i}').value = instant_freq
-                getattr(self, f'avg_freq_{i}').value = avg_freq
-                getattr(self, f'min_freq_{i}').value = min_freq
-                getattr(self, f'max_freq_{i}').value = max_freq
-                getattr(self, f'std_freq_{i}').value = std_freq
+                freq_pvs[name]['instant'].set(instant_freq)
+                freq_pvs[name]['avg'].set(avg_freq)
+                freq_pvs[name]['min'].set(min_freq)
+                freq_pvs[name]['max'].set(max_freq)
+                freq_pvs[name]['std'].set(std_freq)
 
         # Update diff stats for each pair
-        for i in range(self.num_pvs):
-            for j in range(i+1, self.num_pvs):
-                name1 = self.pv_names[i]
-                name2 = self.pv_names[j]
-                times1 = self.data[name1]['times']
-                times2 = self.data[name2]['times']
+        for i in range(num_pvs):
+            for j in range(i+1, num_pvs):
+                name1 = pv_names[i]
+                name2 = pv_names[j]
+                times1 = data[name1]['times']
+                times2 = data[name2]['times']
                 if times1 and times2:
                     # Current diff based on latest update times
                     current_diff = times1[-1] - times2[-1]
@@ -99,19 +105,32 @@ class SyncProfileIOC(PVGroup):
                         max_diff = np.max(diffs)
                         std_diff = np.std(diffs)
 
-                        getattr(self, f'current_diff_{i}_{j}').value = current_diff
-                        getattr(self, f'avg_diff_{i}_{j}').value = avg_diff
-                        getattr(self, f'min_diff_{i}_{j}').value = min_diff
-                        getattr(self, f'max_diff_{i}_{j}').value = max_diff
-                        getattr(self, f'std_diff_{i}_{j}').value = std_diff
+                        diff_pvs[(i, j)]['current'].set(current_diff)
+                        diff_pvs[(i, j)]['avg'].set(avg_diff)
+                        diff_pvs[(i, j)]['min'].set(min_diff)
+                        diff_pvs[(i, j)]['max'].set(max_diff)
+                        diff_pvs[(i, j)]['std'].set(std_diff)
 
-def main():
-    parser = argparse.ArgumentParser(description='EPICS Soft IOC for synchronization profile')
-    parser.add_argument('pv_names', nargs='+', help='List of PV names to monitor')
-    args = parser.parse_args()
+    # Boilerplate get the IOC started
+    builder.LoadDatabase()
+    softioc.iocInit()
 
-    ioc = SyncProfileIOC(args.pv_names)
-    run(ioc, **ioc_arg_parser.parse_known_args()[0])
+    # Start processes required to be run after iocInit
+    monitor_thread = threading.Thread(target=monitor_pvs)
+    monitor_thread.daemon = True
+    monitor_thread.start()
+
+    # Write PV list to file
+    import os
+    with open(args.pvout, "w") as f:
+        old_stdout = os.dup(1)
+        os.dup2(f.fileno(), 1)
+        softioc.dbl()
+        os.dup2(old_stdout, 1)
+        os.close(old_stdout)
+
+    # Leave the IOC running with an interactive shell.
+    softioc.interactive_ioc(globals())
 
 if __name__ == '__main__':
     main()

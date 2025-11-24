@@ -30,10 +30,10 @@ pip install caproto pyepics numpy
 Run the IOC with a list of PV names to monitor:
 
 ```bash
-python sync_profile_ioc.py PV1 PV2 PV3
+python sync_profile_ioc.py PV1 PV2 PV3 [-p pvlist.txt]
 ```
 
-The IOC will start and create output PVs for the calculations.
+The IOC will start and create output PVs for the calculations. The `-p` option specifies the file to write the list of created PVs (default: pvlist.txt).
 
 ## PV Structure
 
