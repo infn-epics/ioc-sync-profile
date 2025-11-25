@@ -105,7 +105,7 @@ def main():
 
     y = 50
     for i, pv in enumerate(pv_list):
-        widget = ET.SubElement(widgets, type="TextUpdate")
+        widget = ET.SubElement(widgets, "widget", type="TextUpdate")
         ET.SubElement(widget, "name").text = f"TextUpdate_{i}"
         ET.SubElement(widget, "x").text = "10"
         ET.SubElement(widget, "y").text = str(y)
