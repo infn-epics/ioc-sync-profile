@@ -8,6 +8,7 @@ from softioc import softioc, builder
 import epics
 import yaml
 import xml.etree.ElementTree as ET
+import xml.dom.minidom
 
 def main():
     parser = argparse.ArgumentParser(description='EPICS Soft IOC for synchronization profile')
@@ -105,18 +106,30 @@ def main():
 
     y = 50
     for i, pv in enumerate(pv_list):
-        widget = ET.SubElement(widgets, "widget", type="TextUpdate")
+        widget = ET.SubElement(widgets, "widget", type="textupdate", version="2.0.0")
         ET.SubElement(widget, "name").text = f"TextUpdate_{i}"
+        ET.SubElement(widget, "pv_name").text = pv
         ET.SubElement(widget, "x").text = "10"
         ET.SubElement(widget, "y").text = str(y)
         ET.SubElement(widget, "width").text = "400"
         ET.SubElement(widget, "height").text = "30"
-        pv_elem = ET.SubElement(widget, "pv_name")
-        ET.SubElement(pv_elem, "name").text = pv
+        ET.SubElement(widget, "horizontal_alignment").text = "1"
+        ET.SubElement(widget, "vertical_alignment").text = "1"
+        ET.SubElement(widget, "wrap_words").text = "false"
+        actions = ET.SubElement(widget, "actions")
+        ET.SubElement(widget, "border_width").text = "1"
         y += 35
 
     tree = ET.ElementTree(root)
-    tree.write(args.bob, encoding="unicode", xml_declaration=True)
+    rough_string = ET.tostring(root, encoding='unicode')
+    dom = xml.dom.minidom.parseString(rough_string)
+    pretty_xml = dom.toprettyxml(indent="  ")
+    # Remove extra newlines
+    lines = pretty_xml.split('\n')
+    non_empty_lines = [line for line in lines if line.strip()]
+    pretty_xml = '\n'.join(non_empty_lines) + '\n'
+    with open(args.bob, 'w', encoding='utf-8') as f:
+        f.write(pretty_xml)
     print(f"Generated Phoebus display file: {args.bob}")
 
     def monitor_pvs():
