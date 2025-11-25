@@ -7,12 +7,14 @@ import numpy as np
 from softioc import softioc, builder
 import epics
 import yaml
+import xml.etree.ElementTree as ET
 
 def main():
     parser = argparse.ArgumentParser(description='EPICS Soft IOC for synchronization profile')
     parser.add_argument('--config', required=True, help='YAML config file with devices to monitor')
     parser.add_argument("-p", "--pvout", required=False, default="pvlist.txt", help="Output PV list file")
     parser.add_argument("--prefix", default="SYNC", help="IOC prefix for PV names")
+    parser.add_argument("--bob", default="sync_profile.bob", help="Output Phoebus .bob file")
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -39,6 +41,7 @@ def main():
 
     # Create PVs for each input PV stats
     freq_pvs = {}
+    timestamp_pvs = {}
     for name in names:
         freq_pvs[name] = {
             'instant': builder.aIn(f'{name}:InstantFreq', initial_value=0.0),
@@ -47,6 +50,7 @@ def main():
             'max': builder.aIn(f'{name}:MaxFreq', initial_value=0.0),
             'std': builder.aIn(f'{name}:StdFreq', initial_value=0.0),
         }
+        timestamp_pvs[name] = builder.aIn(f'{name}:Timestamp', initial_value=0.0)
 
     # Create PVs for time diffs between PVs
     diff_pvs = {}
@@ -65,7 +69,7 @@ def main():
 
     print("Created output PVs:")
     for name in names:
-        print(f"  Frequency stats for {name}: {args.prefix}:{name}:InstantFreq, AvgFreq, MinFreq, MaxFreq, StdFreq")
+        print(f"  Stats for {name}: {args.prefix}:{name}:Timestamp, InstantFreq, AvgFreq, MinFreq, MaxFreq, StdFreq")
     for i in range(num_pvs):
         for j in range(i+1, num_pvs):
             name1 = names[i]
@@ -73,20 +77,63 @@ def main():
             pair_name = f'{name1}_vs_{name2}'
             print(f"  Time diff stats for {name1} vs {name2}: {args.prefix}:{pair_name}:CurrentDiff, AvgDiff, MinDiff, MaxDiff, StdDiff")
 
+    # Generate Phoebus .bob file
+    pv_list = []
+    for name in names:
+        pv_list.append(f"{args.prefix}:{name}:Timestamp")
+        pv_list.append(f"{args.prefix}:{name}:InstantFreq")
+        pv_list.append(f"{args.prefix}:{name}:AvgFreq")
+        pv_list.append(f"{args.prefix}:{name}:MinFreq")
+        pv_list.append(f"{args.prefix}:{name}:MaxFreq")
+        pv_list.append(f"{args.prefix}:{name}:StdFreq")
+    for i in range(num_pvs):
+        for j in range(i+1, num_pvs):
+            name1 = names[i]
+            name2 = names[j]
+            pair_name = f'{name1}_vs_{name2}'
+            pv_list.append(f"{args.prefix}:{pair_name}:CurrentDiff")
+            pv_list.append(f"{args.prefix}:{pair_name}:AvgDiff")
+            pv_list.append(f"{args.prefix}:{pair_name}:MinDiff")
+            pv_list.append(f"{args.prefix}:{pair_name}:MaxDiff")
+            pv_list.append(f"{args.prefix}:{pair_name}:StdDiff")
+
+    root = ET.Element("display", version="2.0.0")
+    ET.SubElement(root, "name").text = "Sync Profile"
+    ET.SubElement(root, "width").text = "1200"
+    ET.SubElement(root, "height").text = str(50 * len(pv_list) + 100)
+    widgets = ET.SubElement(root, "widgets")
+
+    y = 50
+    for i, pv in enumerate(pv_list):
+        widget = ET.SubElement(widgets, type="TextUpdate")
+        ET.SubElement(widget, "name").text = f"TextUpdate_{i}"
+        ET.SubElement(widget, "x").text = "10"
+        ET.SubElement(widget, "y").text = str(y)
+        ET.SubElement(widget, "width").text = "400"
+        ET.SubElement(widget, "height").text = "30"
+        pv_elem = ET.SubElement(widget, "pv_name")
+        ET.SubElement(pv_elem, "name").text = pv
+        y += 35
+
+    tree = ET.ElementTree(root)
+    tree.write(args.bob, encoding="unicode", xml_declaration=True)
+    print(f"Generated Phoebus display file: {args.bob}")
+
     def monitor_pvs():
         def callback(pvname, value, **kwargs):
-            pv_timestamp = kwargs.get('timestamp', time.time())
-            name = pvname
-            if name in data:
-                data[name]['times'].append(pv_timestamp)
-                if len(data[name]['times']) > 1:
-                    dt = pv_timestamp - data[name]['times'][-2]
+            pv_timestamp = kwargs.get('timestamp', -1) ## if no timestamp, set to -1
+            name = pv_to_name.get(pvname)
+            if name and name in data:
+                data[pvname]['times'].append(pv_timestamp)
+                timestamp_pvs[name].set(pv_timestamp)
+                if len(data[pvname]['times']) > 1:
+                    dt = pv_timestamp - data[pvname]['times'][-2]
                     freq = 1.0 / dt if dt > 0 else 0.0
-                    data[name]['freqs'].append(freq)
+                    data[pvname]['freqs'].append(freq)
                     # Keep only recent samples
-                    if len(data[name]['freqs']) > window_size:
-                        data[name]['freqs'] = data[name]['freqs'][-window_size:]
-                        data[name]['times'] = data[name]['times'][-window_size:]
+                    if len(data[pvname]['freqs']) > window_size:
+                        data[pvname]['freqs'] = data[pvname]['freqs'][-window_size:]
+                        data[pvname]['times'] = data[pvname]['times'][-window_size:]
                 update_calculations()
 
         # Connect to PVs
