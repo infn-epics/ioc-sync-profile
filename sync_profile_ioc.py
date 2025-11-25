@@ -269,12 +269,15 @@ def main():
             pv_timestamp = kwargs.get('timestamp', -1) ## if no timestamp, set to -1
             print(f"Callback for {pvname}: value={value}, timestamp={pv_timestamp}")
             name = pv_to_name.get(pvname)
+            print(f"name = {name}")
             if name and name in data:
                 data[pvname]['times'].append(pv_timestamp)
+                print(f"Setting timestamp for {name} to {pv_timestamp}")
                 timestamp_pvs[name].set(pv_timestamp)
                 if len(data[pvname]['times']) > 1:
                     dt = pv_timestamp - data[pvname]['times'][-2]
                     freq = 1.0 / dt if dt > 0 else 0.0
+                    print(f"Calculated freq for {name}: dt={dt}, freq={freq}")
                     data[pvname]['freqs'].append(freq)
                     # Keep only recent samples
                     if len(data[pvname]['freqs']) > window_size:
@@ -300,6 +303,7 @@ def main():
         for name in names:
             pv = name_to_pv[name]
             freqs = data[pv]['freqs']
+            print(f"Updating calculations for {name}, freqs = {freqs}")
             if freqs:
                 instant_freq = freqs[-1]
                 avg_freq = np.mean(freqs)
@@ -307,6 +311,7 @@ def main():
                 max_freq = np.max(freqs)
                 std_freq = np.std(freqs)
 
+                print(f"Setting {args.prefix}:{name}:InstantFreq = {instant_freq}")
                 freq_pvs[name]['instant'].set(instant_freq)
                 freq_pvs[name]['avg'].set(avg_freq)
                 freq_pvs[name]['min'].set(min_freq)
