@@ -46,13 +46,13 @@ def main():
     timestamp_pvs = {}
     for name in names:
         freq_pvs[name] = {
-            'instant': builder.aIn(f'{name}:InstantFreq', initial_value=0.0),
-            'avg': builder.aIn(f'{name}:AvgFreq', initial_value=0.0),
-            'min': builder.aIn(f'{name}:MinFreq', initial_value=0.0),
-            'max': builder.aIn(f'{name}:MaxFreq', initial_value=0.0),
-            'std': builder.aIn(f'{name}:StdFreq', initial_value=0.0),
+            'instant': builder.aIn(f'{name}:InstantFreq', initial_value=0.0, PREC=6),
+            'avg': builder.aIn(f'{name}:AvgFreq', initial_value=0.0, PREC=6),
+            'min': builder.aIn(f'{name}:MinFreq', initial_value=0.0, PREC=6),
+            'max': builder.aIn(f'{name}:MaxFreq', initial_value=0.0, PREC=6),
+            'std': builder.aIn(f'{name}:StdFreq', initial_value=0.0, PREC=6),
         }
-        timestamp_pvs[name] = builder.aIn(f'{name}:Timestamp', initial_value=0.0)
+        timestamp_pvs[name] = builder.aIn(f'{name}:Timestamp', initial_value=0.0, PREC=6)
 
     # Create PVs for time diffs between PVs
     diff_pvs = {}
@@ -62,11 +62,11 @@ def main():
             name2 = names[j]
             pair_name = f'{name1}_vs_{name2}'
             diff_pvs[(i, j)] = {
-                'current': builder.aIn(f'{pair_name}:CurrentDiff', initial_value=0.0),
-                'avg': builder.aIn(f'{pair_name}:AvgDiff', initial_value=0.0),
-                'min': builder.aIn(f'{pair_name}:MinDiff', initial_value=0.0),
-                'max': builder.aIn(f'{pair_name}:MaxDiff', initial_value=0.0),
-                'std': builder.aIn(f'{pair_name}:StdDiff', initial_value=0.0),
+                'current': builder.aIn(f'{pair_name}:CurrentDiff', initial_value=0.0, PREC=6),
+                'avg': builder.aIn(f'{pair_name}:AvgDiff', initial_value=0.0, PREC=6),
+                'min': builder.aIn(f'{pair_name}:MinDiff', initial_value=0.0, PREC=6),
+                'max': builder.aIn(f'{pair_name}:MaxDiff', initial_value=0.0, PREC=6),
+                'std': builder.aIn(f'{pair_name}:StdDiff', initial_value=0.0, PREC=6),
             }
 
     print("Created output PVs:")
@@ -105,7 +105,9 @@ def main():
     x_start = 10
     y_start = 50
     row_height = 35
-    width = x_start + 7 * column_width  # for device table
+    columns_device = ['Device', 'Timestamp', 'InstantFreq', 'AvgFreq', 'MinFreq', 'MaxFreq', 'StdFreq']
+    widths_device = [180, 120, 120, 120, 120, 120, 120]
+    width = x_start + sum(widths_device)  # for device table
     height = 1000  # approximate, will adjust
     ET.SubElement(root, "width").text = str(width)
     ET.SubElement(root, "height").text = str(height)
@@ -113,17 +115,17 @@ def main():
     actions.text = ""
 
     # Device stats table
-    columns_device = ['Device', 'Timestamp', 'InstantFreq', 'AvgFreq', 'MinFreq', 'MaxFreq', 'StdFreq']
     y = y_start
     for col_idx, col in enumerate(columns_device):
-        x = x_start + col_idx * column_width
+        width_col = widths_device[col_idx]
+        x = x_start + sum(widths_device[:col_idx])
         # Column label
         label = ET.SubElement(root, "widget", type="label", version="2.0.0")
         ET.SubElement(label, "name").text = f"Label_Device_{col}"
         ET.SubElement(label, "text").text = col
         ET.SubElement(label, "x").text = str(x)
         ET.SubElement(label, "y").text = "20"
-        ET.SubElement(label, "width").text = str(column_width - 10)
+        ET.SubElement(label, "width").text = str(width_col - 10)
         ET.SubElement(label, "height").text = "30"
         ET.SubElement(label, "horizontal_alignment").text = "1"
         font = ET.SubElement(label, "font")
@@ -138,7 +140,7 @@ def main():
                 ET.SubElement(dev_label, "text").text = name
                 ET.SubElement(dev_label, "x").text = str(x)
                 ET.SubElement(dev_label, "y").text = str(yy)
-                ET.SubElement(dev_label, "width").text = str(column_width - 10)
+                ET.SubElement(dev_label, "width").text = str(width_col - 10)
                 ET.SubElement(dev_label, "height").text = "30"
                 ET.SubElement(dev_label, "horizontal_alignment").text = "1"
             else:
@@ -148,11 +150,12 @@ def main():
                 ET.SubElement(widget, "pv_name").text = pv
                 ET.SubElement(widget, "x").text = str(x)
                 ET.SubElement(widget, "y").text = str(yy)
-                ET.SubElement(widget, "width").text = str(column_width - 10)
+                ET.SubElement(widget, "width").text = str(width_col - 10)
                 ET.SubElement(widget, "height").text = "30"
                 ET.SubElement(widget, "horizontal_alignment").text = "1"
                 ET.SubElement(widget, "vertical_alignment").text = "1"
                 ET.SubElement(widget, "wrap_words").text = "false"
+                ET.SubElement(widget, "precision").text = "6"
                 actions = ET.SubElement(widget, "actions")
                 actions.text = ""
                 ET.SubElement(widget, "border_width").text = "1"
@@ -160,15 +163,17 @@ def main():
     # Diff stats table
     y_diff = y + len(names) * row_height + 50
     columns_diff = ['Pair', 'CurrentDiff', 'AvgDiff', 'MinDiff', 'MaxDiff', 'StdDiff']
+    widths_diff = [180, 120, 120, 120, 120, 120]
     for col_idx, col in enumerate(columns_diff):
-        x = x_start + col_idx * column_width
+        width_col = widths_diff[col_idx]
+        x = x_start + sum(widths_diff[:col_idx])
         # Column label
         label = ET.SubElement(root, "widget", type="label", version="2.0.0")
         ET.SubElement(label, "name").text = f"Label_Diff_{col}"
         ET.SubElement(label, "text").text = col
         ET.SubElement(label, "x").text = str(x)
         ET.SubElement(label, "y").text = str(y_diff - 30)
-        ET.SubElement(label, "width").text = str(column_width - 10)
+        ET.SubElement(label, "width").text = str(width_col - 10)
         ET.SubElement(label, "height").text = "30"
         ET.SubElement(label, "horizontal_alignment").text = "1"
         font = ET.SubElement(label, "font")
@@ -184,7 +189,7 @@ def main():
                 ET.SubElement(pair_label, "text").text = pair.replace('_vs_', ' vs ')
                 ET.SubElement(pair_label, "x").text = str(x)
                 ET.SubElement(pair_label, "y").text = str(yy)
-                ET.SubElement(pair_label, "width").text = str(column_width - 10)
+                ET.SubElement(pair_label, "width").text = str(width_col - 10)
                 ET.SubElement(pair_label, "height").text = "30"
                 ET.SubElement(pair_label, "horizontal_alignment").text = "1"
             else:
@@ -194,11 +199,12 @@ def main():
                 ET.SubElement(widget, "pv_name").text = pv
                 ET.SubElement(widget, "x").text = str(x)
                 ET.SubElement(widget, "y").text = str(yy)
-                ET.SubElement(widget, "width").text = str(column_width - 10)
+                ET.SubElement(widget, "width").text = str(width_col - 10)
                 ET.SubElement(widget, "height").text = "30"
                 ET.SubElement(widget, "horizontal_alignment").text = "1"
                 ET.SubElement(widget, "vertical_alignment").text = "1"
                 ET.SubElement(widget, "wrap_words").text = "false"
+                ET.SubElement(widget, "precision").text = "6"
                 actions = ET.SubElement(widget, "actions")
                 actions.text = ""
                 ET.SubElement(widget, "border_width").text = "1"
@@ -237,6 +243,7 @@ def main():
         ET.SubElement(widget, "horizontal_alignment").text = "1"
         ET.SubElement(widget, "vertical_alignment").text = "1"
         ET.SubElement(widget, "wrap_words").text = "false"
+        ET.SubElement(widget, "precision").text = "6"
         actions = ET.SubElement(widget, "actions")
         actions.text = ""
         ET.SubElement(widget, "border_width").text = "1"
