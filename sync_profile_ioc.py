@@ -23,6 +23,13 @@ def main():
     name_to_pv = {d['name']: d['pv'] for d in devices}
     pv_to_name = {d['pv']: d['name'] for d in devices}
 
+    print(f"Loaded {len(devices)} devices from {args.config}")
+    print("Monitoring PVs:")
+    for name, pv in zip(names, pvs):
+        print(f"  {name}: {pv}")
+    print(f"IOC prefix: {args.prefix}")
+    print(f"Output PV list file: {args.pvout}")
+
     num_pvs = len(pvs)
     data = {pv: {'times': [], 'freqs': []} for pv in pvs}
     window_size = 100  # Number of samples for stats
@@ -55,6 +62,16 @@ def main():
                 'max': builder.aIn(f'{pair_name}:MaxDiff', initial_value=0.0),
                 'std': builder.aIn(f'{pair_name}:StdDiff', initial_value=0.0),
             }
+
+    print("Created output PVs:")
+    for name in names:
+        print(f"  Frequency stats for {name}: {args.prefix}:{name}:InstantFreq, AvgFreq, MinFreq, MaxFreq, StdFreq")
+    for i in range(num_pvs):
+        for j in range(i+1, num_pvs):
+            name1 = names[i]
+            name2 = names[j]
+            pair_name = f'{name1}_vs_{name2}'
+            print(f"  Time diff stats for {name1} vs {name2}: {args.prefix}:{pair_name}:CurrentDiff, AvgDiff, MinDiff, MaxDiff, StdDiff")
 
     def monitor_pvs():
         def callback(pvname, value, **kwargs):
