@@ -267,10 +267,10 @@ def main():
     def monitor_pvs():
         def callback(pvname, value, **kwargs):
             pv_timestamp = kwargs.get('timestamp', -1) ## if no timestamp, set to -1
-            print(f"Callback for {pvname}: value={value}, timestamp={pv_timestamp}")
+            #print(f"Callback for {pvname}: value={value}, timestamp={pv_timestamp}")
             name = pv_to_name.get(pvname)
             print(f"name = {name}")
-            if name and name in data:
+            if name and pvname in data:
                 data[pvname]['times'].append(pv_timestamp)
                 print(f"Setting timestamp for {name} to {pv_timestamp}")
                 timestamp_pvs[name].set(pv_timestamp)
