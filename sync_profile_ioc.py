@@ -4,6 +4,7 @@ import argparse
 import time
 import threading
 import numpy as np
+import logging
 from softioc import softioc, builder
 import epics
 import yaml
@@ -17,8 +18,12 @@ def main():
     parser.add_argument("--prefix", default="SYNC", help="IOC prefix for PV names")
     parser.add_argument("--bob", default="sync_profile.bob", help="Output Phoebus .bob file")
     parser.add_argument("--polling-freq", type=float, help="Polling frequency in Hz, if not given use monitoring")
+    parser.add_argument("--iocname", help="IOC name to display as title")
+    parser.add_argument("--loglevel", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="Logging level")
     parser.add_argument("--create-display-only", action="store_true", help="Create Phoebus display file and exit without running IOC")
     args = parser.parse_args()
+
+    logging.basicConfig(level=getattr(logging, args.loglevel.upper()), format='%(asctime)s - %(levelname)s - %(message)s')
 
     with open(args.config) as f:
         config = yaml.safe_load(f)
@@ -28,16 +33,16 @@ def main():
     name_to_pv = {d['name']: d['pv'] for d in devices}
     pv_to_name = {d['pv']: d['name'] for d in devices}
 
-    print(f"Loaded {len(devices)} devices from {args.config}")
-    print("Monitoring PVs:")
+    logging.info(f"Loaded {len(devices)} devices from {args.config}")
+    logging.info("Monitoring PVs:")
     for name, pv in zip(names, pvs):
-        print(f"  {name}: {pv}")
-    print(f"IOC prefix: {args.prefix}")
-    print(f"Output PV list file: {args.pvout}")
+        logging.info(f"  {name}: {pv}")
+    logging.info(f"IOC prefix: {args.prefix}")
+    logging.info(f"Output PV list file: {args.pvout}")
     if args.polling_freq:
-        print(f"Mode: Polling at {args.polling_freq} Hz")
+        logging.info(f"Mode: Polling at {args.polling_freq} Hz")
     else:
-        print("Mode: Monitoring")
+        logging.info("Mode: Monitoring")
 
     num_pvs = len(pvs)
     data = {pv: {'times': [], 'freqs': []} for pv in pvs}
@@ -74,15 +79,15 @@ def main():
                 'std': builder.aIn(f'{pair_name}:StdDiff', initial_value=0.0, PREC=6),
             }
 
-    print("Created output PVs:")
+    logging.info("Created output PVs:")
     for name in names:
-        print(f"  Stats for {name}: {args.prefix}:{name}:Timestamp, InstantFreq, AvgFreq, MinFreq, MaxFreq, StdFreq")
+        logging.info(f"  Stats for {name}: {args.prefix}:{name}:Timestamp, InstantFreq, AvgFreq, MinFreq, MaxFreq, StdFreq")
     for i in range(num_pvs):
         for j in range(i+1, num_pvs):
             name1 = names[i]
             name2 = names[j]
             pair_name = f'{name1}_vs_{name2}'
-            print(f"  Time diff stats for {name1} vs {name2}: {args.prefix}:{pair_name}:CurrentDiff, AvgDiff, MinDiff, MaxDiff, StdDiff")
+            logging.info(f"  Time diff stats for {name1} vs {name2}: {args.prefix}:{pair_name}:CurrentDiff, AvgDiff, MinDiff, MaxDiff, StdDiff")
 
     # Generate Phoebus .bob file
     pv_list = []
@@ -105,10 +110,14 @@ def main():
             pv_list.append(f"{args.prefix}:{pair_name}:StdDiff")
 
     root = ET.Element("display", version="2.0.0")
-    ET.SubElement(root, "name").text = "Sync Profile"
+    display_name = args.iocname if args.iocname else "Sync Profile"
+    ET.SubElement(root, "name").text = display_name
+    mode_text = "Mode: Monitoring"
+    if args.polling_freq:
+        mode_text = f"Mode: Polling at {args.polling_freq} Hz"
     column_width = 120
     x_start = 10
-    y_start = 50
+    y_start = 80  # Increased to leave more space after mode label
     row_height = 35
     columns_device = ['Device', 'Timestamp', 'InstantFreq', 'AvgFreq', 'MinFreq', 'MaxFreq', 'StdFreq']
     widths_device = [180, 120, 120, 120, 120, 120, 120]
@@ -118,6 +127,31 @@ def main():
     ET.SubElement(root, "height").text = str(height)
     actions = ET.SubElement(root, "actions")
     actions.text = ""
+    # Add title label first
+    title_label = ET.SubElement(root, "widget", type="label", version="2.0.0")
+    ET.SubElement(title_label, "name").text = "Title_Label"
+    ET.SubElement(title_label, "text").text = display_name
+    ET.SubElement(title_label, "x").text = "10"
+    ET.SubElement(title_label, "y").text = "10"
+    ET.SubElement(title_label, "width").text = str(width)
+    ET.SubElement(title_label, "height").text = "30"
+    ET.SubElement(title_label, "horizontal_alignment").text = "1"
+    ET.SubElement(title_label, "background_color").text = "#F0F0F0"
+    ET.SubElement(title_label, "foreground_color").text = "#0000FF"
+    font = ET.SubElement(title_label, "font")
+    ET.SubElement(font, "font", name="Liberation Sans", style="BOLD", size="26.0")
+    # Add mode label after
+    mode_label = ET.SubElement(root, "widget", type="label", version="2.0.0")
+    ET.SubElement(mode_label, "name").text = "Mode_Label"
+    ET.SubElement(mode_label, "text").text = mode_text
+    ET.SubElement(mode_label, "x").text = "10"
+    ET.SubElement(mode_label, "y").text = "40"
+    ET.SubElement(mode_label, "width").text = "400"
+    ET.SubElement(mode_label, "height").text = "25"
+    ET.SubElement(mode_label, "horizontal_alignment").text = "0"
+    ET.SubElement(mode_label, "background_color").text = "#E8F4FD"  # Light blue background
+    font = ET.SubElement(mode_label, "font")
+    ET.SubElement(font, "font", name="Liberation Sans", style="BOLD", size="14.0")
 
     # Device stats table
     y = y_start
@@ -129,10 +163,11 @@ def main():
         ET.SubElement(label, "name").text = f"Label_Device_{col}"
         ET.SubElement(label, "text").text = col
         ET.SubElement(label, "x").text = str(x)
-        ET.SubElement(label, "y").text = "20"
+        ET.SubElement(label, "y").text = "65"  # Adjusted y
         ET.SubElement(label, "width").text = str(width_col - 10)
         ET.SubElement(label, "height").text = "30"
         ET.SubElement(label, "horizontal_alignment").text = "1"
+        ET.SubElement(label, "background_color").text = "#D3D3D3"  # Light gray
         font = ET.SubElement(label, "font")
         ET.SubElement(font, "font", name="Liberation Sans", style="BOLD", size="12.0")
         # Rows
@@ -181,6 +216,7 @@ def main():
         ET.SubElement(label, "width").text = str(width_col - 10)
         ET.SubElement(label, "height").text = "30"
         ET.SubElement(label, "horizontal_alignment").text = "1"
+        ET.SubElement(label, "background_color").text = "#D3D3D3"
         font = ET.SubElement(label, "font")
         ET.SubElement(font, "font", name="Liberation Sans", style="BOLD", size="12.0")
         # Rows
@@ -224,6 +260,7 @@ def main():
     ET.SubElement(header_label, "width").text = "360"
     ET.SubElement(header_label, "height").text = "30"
     ET.SubElement(header_label, "horizontal_alignment").text = "1"
+    ET.SubElement(header_label, "background_color").text = "#D3D3D3"
     font = ET.SubElement(header_label, "font")
     ET.SubElement(font, "font", name="Liberation Sans", style="BOLD", size="14.0")
 
@@ -268,26 +305,27 @@ def main():
     lines = pretty_xml.split('\n')
     non_empty_lines = [line for line in lines if line.strip()]
     pretty_xml = '\n'.join(non_empty_lines) + '\n'
+    logging.info(f"Generated Phoebus display file: {args.bob}")
+
     with open(args.bob, 'w', encoding='utf-8') as f:
         f.write(pretty_xml)
-    print(f"Generated Phoebus display file: {args.bob}")
 
     if args.create_display_only:
-        print("Display creation complete. Exiting.")
+        logging.info("Display creation complete. Exiting.")
         return
 
     def monitor_pvs():
         def process_update(pvname, value, pv_timestamp):
             name = pv_to_name.get(pvname)
-            print(f"name = {name}")
+            logging.debug(f"name = {name}")
             if name and pvname in data:
                 data[pvname]['times'].append(pv_timestamp)
-                print(f"Setting timestamp for {name} to {pv_timestamp}")
+                logging.debug(f"Setting timestamp for {name} to {pv_timestamp}")
                 timestamp_pvs[name].set(pv_timestamp)
                 if len(data[pvname]['times']) > 1:
                     dt = pv_timestamp - data[pvname]['times'][-2]
                     freq = 1.0 / dt if dt > 0 else 0.0
-                    print(f"Calculated freq for {name}: dt={dt}, freq={freq}")
+                    logging.debug(f"Calculated freq for {name}: dt={dt}, freq={freq}")
                     data[pvname]['freqs'].append(freq)
                     # Keep only recent samples
                     if len(data[pvname]['freqs']) > window_size:
@@ -306,7 +344,7 @@ def main():
                         timestamp = pv_obj.timestamp
                         process_update(pv_obj.pvname, value, timestamp)
                     except Exception as e:
-                        print(f"Failed to poll {pv_obj.pvname}: {e}")
+                        logging.error(f"Failed to poll {pv_obj.pvname}: {e}")
                 time.sleep(polling_interval)
         else:
             # Monitoring mode
@@ -316,12 +354,12 @@ def main():
 
             # Connect to PVs
             for pv in pvs:
-                print(f"Starting to monitor {pv}")
+                logging.info(f"Starting to monitor {pv}")
                 try:
                     epics.camonitor(pv, callback=callback_monitor)
-                    print(f"Successfully set up monitor for {pv}")
+                    logging.info(f"Successfully set up monitor for {pv}")
                 except Exception as e:
-                    print(f"Failed to monitor {pv}: {e}")
+                    logging.error(f"Failed to monitor {pv}: {e}")
 
             # Keep running
             while True:
@@ -332,7 +370,7 @@ def main():
         for name in names:
             pv = name_to_pv[name]
             freqs = data[pv]['freqs']
-            print(f"Updating calculations for {name}, freqs = {freqs}")
+            logging.debug(f"Updating calculations for {name}, freqs = {freqs}")
             if freqs:
                 instant_freq = freqs[-1]
                 avg_freq = np.mean(freqs)
@@ -340,7 +378,7 @@ def main():
                 max_freq = np.max(freqs)
                 std_freq = np.std(freqs)
 
-                print(f"Setting {args.prefix}:{name}:InstantFreq = {instant_freq}")
+                logging.debug(f"Setting {args.prefix}:{name}:InstantFreq = {instant_freq}")
                 freq_pvs[name]['instant'].set(instant_freq)
                 freq_pvs[name]['avg'].set(avg_freq)
                 freq_pvs[name]['min'].set(min_freq)
