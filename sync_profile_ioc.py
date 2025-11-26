@@ -16,6 +16,7 @@ def main():
     parser.add_argument("-p", "--pvout", required=False, default="pvlist.txt", help="Output PV list file")
     parser.add_argument("--prefix", default="SYNC", help="IOC prefix for PV names")
     parser.add_argument("--bob", default="sync_profile.bob", help="Output Phoebus .bob file")
+    parser.add_argument("--polling-freq", type=float, help="Polling frequency in Hz, if not given use monitoring")
     parser.add_argument("--create-display-only", action="store_true", help="Create Phoebus display file and exit without running IOC")
     args = parser.parse_args()
 
@@ -33,6 +34,10 @@ def main():
         print(f"  {name}: {pv}")
     print(f"IOC prefix: {args.prefix}")
     print(f"Output PV list file: {args.pvout}")
+    if args.polling_freq:
+        print(f"Mode: Polling at {args.polling_freq} Hz")
+    else:
+        print("Mode: Monitoring")
 
     num_pvs = len(pvs)
     data = {pv: {'times': [], 'freqs': []} for pv in pvs}
@@ -272,9 +277,7 @@ def main():
         return
 
     def monitor_pvs():
-        def callback(pvname, value, **kwargs):
-            pv_timestamp = kwargs.get('timestamp', -1) ## if no timestamp, set to -1
-            #print(f"Callback for {pvname}: value={value}, timestamp={pv_timestamp}")
+        def process_update(pvname, value, pv_timestamp):
             name = pv_to_name.get(pvname)
             print(f"name = {name}")
             if name and pvname in data:
@@ -292,18 +295,37 @@ def main():
                         data[pvname]['times'] = data[pvname]['times'][-window_size:]
                 update_calculations()
 
-        # Connect to PVs
-        for pv in pvs:
-            print(f"Starting to monitor {pv}")
-            try:
-                epics.camonitor(pv, callback=callback)
-                print(f"Successfully set up monitor for {pv}")
-            except Exception as e:
-                print(f"Failed to monitor {pv}: {e}")
+        if args.polling_freq:
+            # Polling mode
+            polling_interval = 1.0 / args.polling_freq
+            pv_objects = [epics.PV(pv) for pv in pvs]
+            while True:
+                for pv_obj in pv_objects:
+                    try:
+                        value = pv_obj.get()
+                        timestamp = pv_obj.timestamp
+                        process_update(pv_obj.pvname, value, timestamp)
+                    except Exception as e:
+                        print(f"Failed to poll {pv_obj.pvname}: {e}")
+                time.sleep(polling_interval)
+        else:
+            # Monitoring mode
+            def callback_monitor(pvname, value, **kwargs):
+                pv_timestamp = kwargs.get('timestamp', -1)
+                process_update(pvname, value, pv_timestamp)
 
-        # Keep running
-        while True:
-            time.sleep(1)
+            # Connect to PVs
+            for pv in pvs:
+                print(f"Starting to monitor {pv}")
+                try:
+                    epics.camonitor(pv, callback=callback_monitor)
+                    print(f"Successfully set up monitor for {pv}")
+                except Exception as e:
+                    print(f"Failed to monitor {pv}: {e}")
+
+            # Keep running
+            while True:
+                time.sleep(1)
 
     def update_calculations():
         # Update frequency stats for each PV
